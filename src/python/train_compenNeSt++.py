@@ -45,8 +45,8 @@ Citation:
 import os
 
 # set device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2'
-device_ids = [0, 1, 2]
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+device_ids = [0 ]
 
 from trainNetwork import *
 import Models
@@ -61,26 +61,27 @@ else:
 dataset_root = fullfile(os.getcwd(), '../../data')
 
 data_list = [
-    'light1/pos1/cloud_np',
-    'light1/pos1/lavender_np',
-    'light1/pos2/cubes_np',
-    'light1/pos3/bars_spec_np',
-    'light1/pos4/bubbles_np',
-    'light1/pos5/pillow_np',
-    'light2/pos1/curves_np',
-    'light2/pos1/lavender_np',
-    'light2/pos1/stripes_np',
-    'light2/pos2/lavender_spec_np',
-    'light2/pos3/curves_np',
-    'light2/pos4/lavender_np',
-    'light2/pos5/stripes_np',
-    'light2/pos6/cubes_np',
-    'light2/pos6/curves_np',
-    'light3/pos1/bubbles_np',
-    'light3/pos1/cloud_np',
-    'light3/pos1/squares_np',
-    'light3/pos2/curves_np',
-    'light3/pos2/water_np',
+    'dasan/plane1'
+    # 'light1/pos1/cloud_np',
+    # 'light1/pos1/lavender_np',
+    # 'light1/pos2/cubes_np',
+    # 'light1/pos3/bars_spec_np',
+    # 'light1/pos4/bubbles_np',
+    # 'light1/pos5/pillow_np',
+    # 'light2/pos1/curves_np',
+    # 'light2/pos1/lavender_np',
+    # 'light2/pos1/stripes_np',
+    # 'light2/pos2/lavender_spec_np',
+    # 'light2/pos3/curves_np',
+    # 'light2/pos4/lavender_np',
+    # 'light2/pos5/stripes_np',
+    # 'light2/pos6/cubes_np',
+    # 'light2/pos6/curves_np',
+    # 'light3/pos1/bubbles_np',
+    # 'light3/pos1/cloud_np',
+    # 'light3/pos1/squares_np',
+    # 'light3/pos2/curves_np',
+    # 'light3/pos2/water_np',
 ]
 
 # Training configurations of CompenNet++ reported in the paper
@@ -92,7 +93,7 @@ loss_list = ['l1+ssim']
 # loss_list = ['l1', 'l2', 'ssim', 'l1+l2', 'l1+ssim', 'l2+ssim', 'l1+l2+ssim']
 
 # You can create your own models in Models.py and put their names in this list for comparisons.
-model_list = ['CompenNeSt++']
+model_list = ['WarpingNetOnly', 'CompenNeSt++', 'CompenNet++']
 # model_list = ['CompenNeSt++', 'CompenNeSt++_w/o_refine']
 
 # default training options
@@ -104,7 +105,7 @@ train_option_default = {'max_iters': 1500,
                         'loss': '',  # loss will be set to one of the loss functions in loss_list later
                         'l2_reg': 1e-4,  # l2 regularization
                         'device': device,
-                        'pre-trained': False,
+                        'pre-trained': True,
                         'plot_on': True,  # plot training progress using visdom (disable for faster training)
                         'train_plot_rate': 100,  # training and visdom plot rate (increase for faster training)
                         'valid_rate': 100}  # validation and visdom plot rate (increase for faster training)
@@ -126,21 +127,18 @@ log_file.write(title_str.format('data_name', 'model_name', 'loss_function',
                                 'valid_psnr', 'valid_rmse', 'valid_ssim'))
 log_file.close()
 
-# resize the input images if input_size is not None
-input_size = None
-# input_size = (256, 256) # we can also use a low-res input to reduce memory usage and speed up training/testing with a sacrifice of precision
+# resize the input images if cam_size is not None
+# cam_size = None
+cam_size = None # we can also use a low-res input to reduce memory usage and speed up training/testing with a sacrifice of precision
+prj_size = (600, 600)
 resetRNGseed(0)
 
-# create a CompenNeSt
-compen_nest = Models.CompenNeSt()
-if torch.cuda.device_count() >= 1: compen_nest = nn.DataParallel(compen_nest, device_ids=device_ids).to(device)
-compen_nest = initCompenNeSt(compen_nest, dataset_root, device)
 
 # stats for different setups
 for data_name in data_list:
     # load training and validation data
     data_root = fullfile(dataset_root, data_name)
-    cam_surf, cam_train, cam_valid, prj_train, prj_valid, mask_corners = loadData(dataset_root, data_name, input_size, CompenNeSt_only=False)
+    cam_surf, cam_train, cam_valid, prj_train, prj_valid, mask_corners = loadData(dataset_root, data_name, cam_size, prj_size, CompenNeSt_only=False)
 
     # surface image for training and validation
     cam_surf_train = cam_surf.expand_as(cam_train)
@@ -185,8 +183,32 @@ for data_name in data_list:
                 if torch.cuda.device_count() >= 1: warping_net = nn.DataParallel(warping_net, device_ids=device_ids).to(device)
 
                 # create a CompenNet++ model from exisitng WarpingNet and CompenNeSt
-                compen_nest_pp = Models.CompenNeStPlusplus(warping_net, compen_nest)
-                if torch.cuda.device_count() >= 1: compen_nest_pp = nn.DataParallel(compen_nest_pp, device_ids=device_ids).to(device)
+                network_model = None
+                if model_name == 'CompenNeSt++':
+                    # create a CompenNeSt
+                    compen_nest = Models.CompenNeSt()
+                    if torch.cuda.device_count() >= 1: compen_nest = nn.DataParallel(compen_nest, device_ids=device_ids).to(device)
+                    # load pretrained parameters
+                    ckpt_file = '../../checkpoint/blender_pretrained_CompenNeSt_l1+ssim_50000_32_20000_0.0015_0.8_2000_0.0001_20000.pth'
+                    compen_nest.load_state_dict(torch.load(ckpt_file))
+                    network_model = Models.CompenNeStPlusplus(warping_net, compen_nest)
+                
+                elif model_name == 'CompenNet++':
+                    # create a CompenNet
+                    compen_net = Models.CompenNet()
+                    if torch.cuda.device_count() >= 1: compen_net = nn.DataParallel(compen_net, device_ids=device_ids).to(device)
+                    # load pretrained parameters
+                    ckpt_file = '../../checkpoint/init_CompenNet_l1+ssim_500_48_500_0.001_0.2_800_0.0001.pth'
+                    compen_net.load_state_dict(torch.load(ckpt_file))
+                    network_model = Models.CompenNetPlusplus(warping_net, compen_net)
+                
+                elif model_name == 'WarpingNetOnly':
+                    network_model = Models.WarpingNetOnly(warping_net)
+                else:
+                    print("not supported model name")
+                    exit(-1)
+
+                if torch.cuda.device_count() >= 1: network_model = nn.DataParallel(network_model, device_ids=device_ids).to(device)
 
                 # train option for current configuration, i.e., data name and loss function
                 train_option['data_name'] = data_name.replace('/', '_')
@@ -197,7 +219,7 @@ for data_name in data_list:
                 print('------------------------------------ Start training {:s} ---------------------------'.format(model_name))
 
                 # train model
-                compen_nest_pp, valid_psnr, valid_rmse, valid_ssim = trainModel(compen_nest_pp, train_data, valid_data, train_option)
+                network_model, valid_psnr, valid_rmse, valid_ssim = trainModel(network_model, train_data, valid_data, train_option)
 
                 # uncompensated metrics
                 cam_raw_valid = readImgsMT(fullfile(data_root, 'cam/raw/test'))
@@ -217,7 +239,11 @@ for data_name in data_list:
                     torch.cuda.empty_cache()
 
                     # desired test images are created such that they can fill the optimal displayable area (see paper for detail)
-                    desire_test_path = fullfile(data_root, 'cam/desire/test')
+                    
+                    if model_name == "WarpingNetOnly":
+                        desire_test_path = fullfile(data_root, 'cam/desire/train')
+                    else:
+                        desire_test_path = fullfile(data_root, 'cam/desire/test')
                     assert os.path.isdir(desire_test_path), 'images and folder {:s} does not exist!'.format(desire_test_path)
 
                     # compensate and save images
@@ -225,11 +251,11 @@ for data_name in data_list:
                     cam_surf_test = cam_surf.expand_as(desire_test).to(device)
                     with torch.no_grad():
                         # simplify CompenNet++
-                        compen_nest_pp.module.simplify(cam_surf_test[0, ...].unsqueeze(0))
+                        network_model.module.simplify(cam_surf_test[0, ...].unsqueeze(0))
 
                         # compensate using CompenNet++
-                        compen_nest_pp.eval()
-                        prj_cmp_test = compen_nest_pp(desire_test, cam_surf_test).detach()  # compensated prj input image x^{*}
+                        network_model.eval()
+                        prj_cmp_test = network_model(desire_test, cam_surf_test).detach()  # compensated prj input image x^{*}
                     del desire_test, cam_surf_test
 
                     # create image save path
@@ -243,7 +269,7 @@ for data_name in data_list:
                     print('Compensation images saved to ' + prj_cmp_path)
 
                 # clear cache
-                del compen_nest_pp, warping_net
+                del network_model, warping_net
                 torch.cuda.empty_cache()
                 print('-------------------------------------- Done! ---------------------------\n')
         del train_data

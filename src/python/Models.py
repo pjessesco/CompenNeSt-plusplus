@@ -217,7 +217,7 @@ class CompenNeSt(nn.Module):
 
 # WarpingNet
 class WarpingNet(nn.Module):
-    def __init__(self, grid_shape=(6, 6), out_size=(256, 256), with_refine=True):
+    def __init__(self, grid_shape=(6, 6), out_size=(600, 600), with_refine=True):
         super(WarpingNet, self).__init__()
         self.grid_shape = grid_shape
         self.out_size = out_size
@@ -330,6 +330,25 @@ class CompenNetPlusplus(nn.Module):
         # photometric compensation using CompenNet
         x = self.compen_net(x, s)
 
+        return x
+
+# JO : WarpingNetOnly
+class WarpingNetOnly(nn.Module):
+    def __init__(self, warping_net=None):
+        super(WarpingNetOnly, self).__init__()
+        self.name = 'WarpingNetOnly'
+
+        # initialize from existing models or create new models
+        self.warping_net = copy.deepcopy(warping_net.module) if warping_net is not None else WarpingNet()
+
+    # simplify trained model to a single sampling grid for faster testing
+    def simplify(self, s):
+        self.warping_net.simplify(s)
+
+    # s is Bx3x256x256 surface image
+    def forward(self, x, s):
+        # geometric correction using WarpingNet (both x and s)
+        x = self.warping_net(x)
         return x
 
 

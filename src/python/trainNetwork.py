@@ -21,7 +21,7 @@ ssim_fun = pytorch_ssim.SSIM().cuda()
 
 
 # %% load training and validation data for CompenNe(S)t++
-def loadData(dataset_root, data_name, input_size, data_type='raw', CompenNeSt_only=False):
+def loadData(dataset_root, data_name, cam_size, prj_size, data_type='raw', CompenNeSt_only=False):
     if CompenNeSt_only:
         data_type = 'warpSL'
 
@@ -36,17 +36,17 @@ def loadData(dataset_root, data_name, input_size, data_type='raw', CompenNeSt_on
 
     # training data
     cam_surf = readImgsMT(cam_ref_path, index=[125])  # ref/img_0126.png is cam-captured surface image i.e., s when img_gray.png i.e., x0 projected
-    cam_train = readImgsMT(cam_train_path)
-    prj_train = readImgsMT(prj_train_path)
+    cam_train = readImgsMT(cam_train_path, size=cam_size)
+    prj_train = readImgsMT(prj_train_path, size=prj_size)
 
     # validation data
-    cam_valid = readImgsMT(cam_valid_path)
-    prj_valid = readImgsMT(prj_valid_path)
+    cam_valid = readImgsMT(cam_valid_path, size=cam_size)
+    prj_valid = readImgsMT(prj_valid_path, size=prj_size)
 
     mask_corners = None
     if not CompenNeSt_only:
         # find projector FOV mask
-        im_diff = readImgsMT(cam_ref_path, index=[124], size=input_size) - readImgsMT(cam_ref_path, index=[0], size=input_size)
+        im_diff = readImgsMT(cam_ref_path, index=[124], size=cam_size) - readImgsMT(cam_ref_path, index=[0], size=cam_size)
         im_diff = im_diff.numpy().transpose((2, 3, 1, 0))
         prj_fov_mask = torch.zeros(cam_surf.shape)
 
@@ -210,10 +210,20 @@ def trainModel(net, train_data, valid_data, train_option):
 
     # Done training and save the last epoch model
     checkpoint_dir = '../../checkpoint'
-    if not os.path.exists(checkpoint_dir): os.makedirs(checkpoint_dir)
-    checkpoint_file_name = fullfile(checkpoint_dir, title + '.pth')
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
+        pretrain = True
+    else:
+        checkpoint_file_name = fullfile(checkpoint_dir, title + '.pth')
     torch.save(net.state_dict(), checkpoint_file_name)
     print('Checkpoint saved to {}\n'.format(checkpoint_file_name))
+
+    warping_net_model_param = {}
+    for k, v in net.state_dict().items():
+        if "warping_net" in k:
+            warping_net_model_param[k[19:]] = v
+
+    torch.save(warping_net_model_param, checkpoint_file_name+"_warpingnet.pth")
 
     return net, valid_psnr, valid_rmse, valid_ssim
 
@@ -268,7 +278,7 @@ def plotMontage(*argv, index=None, win=None, title=None, env=None):
             idx = range(grid_w)
 
         # resize to (256, 256) for better display
-        tile_size = (256, 256)
+        tile_size = (600, 600)
         im_resize = torch.empty((len(argv) * grid_w, argv[0].shape[1]) + tile_size)
         i = 0
         for im in argv:
